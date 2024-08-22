@@ -1,0 +1,121 @@
+---
+kind: pipeline
+name: default
+type: kubernetes
+
+platform:
+  os: linux
+  arch: amd64
+
+steps:
+- name: build_and_push_image
+  pull: if-not-exists
+  image: plugins/docker
+  settings:
+    context: app
+    dockerfile: app/Dockerfile
+    force_tag: true
+    registry: quay.io
+    repo: quay.io/ukhomeofficedigital/dq-raw-message-retrieval
+    tags:
+    - ${DRONE_COMMIT_SHA}
+    - ${DRONE_BRANCH}-${DRONE_BUILD_NUMBER}
+  environment:
+    DOCKER_PASSWORD:
+      from_secret: docker_password
+    DOCKER_USERNAME:
+      from_secret: docker_username
+  when:
+    event:
+    - push
+
+- name: trivy_scan
+  pull: if-not-exists
+  image: aquasec/trivy
+  commands:
+  - trivy --ignore-unfixed --exit-code 1 --no-progress quay.io/ukhomeofficedigital/dq-raw-message-retrieval:${DRONE_COMMIT_SHA}
+  when:
+    branch:
+      exclude:
+      - master
+    event:
+    - push
+
+- name: deploy_to_dev
+  pull: if-not-exists
+  image: quay.io/ukhomeofficedigital/kd:latest
+  commands:
+  - export KUBE_SERVER=$$DEV_KUBE_SERVER
+  - export KUBE_TOKEN=$$DEV_KUBE_TOKEN
+  - export BUCKET_NAME=$$DEV_BUCKET_NAME
+  - export AWS_ACCESS_KEY_ID=$$DEV_AWS_ACCESS_KEY_ID
+  - export AWS_SECRET_ACCESS_KEY=$$DEV_AWS_SECRET_ACCESS_KEY
+  - export KEYCLOAK_CLIENT_SECRET=$$DEV_KEYCLOAK_CLIENT_SECRET
+  - export KEYCLOAK_DISCOVERY=$$DEV_KEYCLOAK_DISCOVERY
+  - export WHITELIST_RANGES=$$WHITELIST_RANGES_NOTPROD
+  - kd -f kube/network-policy.yml -f kube/secret.yml -f kube/deployment-dev.yml -f kube/service.yml -f kube/ingress-dev.yml
+  environment:
+    DEV_AWS_ACCESS_KEY_ID:
+      from_secret: DEV_AWS_ACCESS_KEY_ID
+    DEV_AWS_SECRET_ACCESS_KEY:
+      from_secret: DEV_AWS_SECRET_ACCESS_KEY
+    DEV_BUCKET_NAME:
+      from_secret: DEV_BUCKET_NAME
+    DEV_KEYCLOAK_CLIENT_SECRET:
+      from_secret: DEV_KEYCLOAK_CLIENT_SECRET
+    DEV_KEYCLOAK_DISCOVERY:
+      from_secret: DEV_KEYCLOAK_DISCOVERY
+    DEV_KUBE_SERVER:
+      from_secret: DEV_KUBE_SERVER
+    DEV_KUBE_TOKEN:
+      from_secret: DEV_KUBE_TOKEN
+    ENV: notprod
+    INSECURE_SKIP_TLS_VERIFY: true
+    KUBE_NAMESPACE: dq-apps-notprod
+    URL: retrieve-a-raw-message.notprod.dq.homeoffice.gov.uk
+    WHITELIST_RANGES_NOTPROD:
+      from_secret: WHITELIST_RANGES_NOTPROD
+  when:
+    event:
+    - push
+
+- name: deploy_to_prod
+  pull: if-not-exists
+  image: quay.io/ukhomeofficedigital/kd:latest
+  commands:
+  - export KUBE_SERVER=$$PROD_KUBE_SERVER
+  - export KUBE_TOKEN=$$PROD_KUBE_TOKEN
+  - export BUCKET_NAME=$$PROD_BUCKET_NAME
+  - export AWS_ACCESS_KEY_ID=$$PROD_AWS_ACCESS_KEY_ID
+  - export AWS_SECRET_ACCESS_KEY=$$PROD_AWS_SECRET_ACCESS_KEY
+  - export KEYCLOAK_CLIENT_SECRET=$$PROD_KEYCLOAK_CLIENT_SECRET
+  - export KEYCLOAK_DISCOVERY=$$PROD_KEYCLOAK_DISCOVERY
+  - kd -f kube/network-policy.yml -f kube/secret.yml -f kube/deployment.yml -f kube/service.yml -f kube/ingress.yml
+  environment:
+    ENV: prod
+    INSECURE_SKIP_TLS_VERIFY: true
+    KUBE_NAMESPACE: dq-apps
+    PROD_AWS_ACCESS_KEY_ID:
+      from_secret: PROD_AWS_ACCESS_KEY_ID
+    PROD_AWS_SECRET_ACCESS_KEY:
+      from_secret: PROD_AWS_SECRET_ACCESS_KEY
+    PROD_BUCKET_NAME:
+      from_secret: PROD_BUCKET_NAME
+    PROD_KEYCLOAK_CLIENT_SECRET:
+      from_secret: PROD_KEYCLOAK_CLIENT_SECRET
+    PROD_KEYCLOAK_DISCOVERY:
+      from_secret: PROD_KEYCLOAK_DISCOVERY
+    PROD_KUBE_SERVER:
+      from_secret: PROD_KUBE_SERVER
+    PROD_KUBE_TOKEN:
+      from_secret: PROD_KUBE_TOKEN
+    URL: retrieve-a-raw-message.dq.homeoffice.gov.uk
+  when:
+    event:
+    - promote
+    target:
+    - production
+
+services:
+  - name: docker
+    image: 340268328991.dkr.ecr.eu-west-2.amazonaws.com/acp/dindr

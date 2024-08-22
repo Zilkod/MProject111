@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: dq-raw-message-retrieval-service
+  name: dq-raw-message-retrieval-service
+spec:
+  ports:
+  - name: https
+    port: 10443
+    targetPort: https
+  selector:
+    name: dq-raw-message-retrieval
